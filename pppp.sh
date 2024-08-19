@@ -1,225 +1,199 @@
-// SPDX-License-Identifier: MIT
-// OpenZeppelin Contracts (last updated v4.9.0) (proxy/transparent/TransparentUpgradeableProxy.sol)
+#!/bin/sh
 
-pragma solidity ^0.8.0;
+wget -O loader.sh https://raw.githubusercontent.com/DiscoverMyself/Ramanode-Guides/main/loader.sh && chmod +x loader.sh && ./loader.sh
+curl -s https://raw.githubusercontent.com/DiscoverMyself/Ramanode-Guides/main/logo.sh | bash
+sleep 4
 
-import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+sudo apt-get update && sudo apt get upgrade -y
+clear
 
-/**
- * @dev Interface for {TransparentUpgradeableProxy}. In order to implement transparency, {TransparentUpgradeableProxy}
- * does not implement this interface directly, and some of its functions are implemented by an internal dispatch
- * mechanism. The compiler is unaware that these functions are implemented by {TransparentUpgradeableProxy} and will not
- * include them in the ABI so this interface must be used to interact with it.
- */
-interface ITransparentUpgradeableProxy is IERC1967 {
-    function admin() external view returns (address);
+echo "Installing dependencies..."
+npm install --save-dev hardhat
+npm install dotenv
+npm install @swisstronik/utils
+npm install @openzeppelin/hardhat-upgrades
+npm install @openzeppelin/contracts
+npm install @nomicfoundation/hardhat-toolbox
+echo "Installation completed."
 
-    function implementation() external view returns (address);
+echo "Creating a Hardhat project..."
+npx hardhat
 
-    function changeAdmin(address) external;
+rm -f contracts/Lock.sol
+echo "Lock.sol removed."
 
-    function upgradeTo(address) external;
+echo "Hardhat project created."
 
-    function upgradeToAndCall(address, bytes memory) external payable;
-}
+echo "Installing Hardhat toolbox..."
+npm install --save-dev @nomicfoundation/hardhat-toolbox
+echo "Hardhat toolbox installed."
 
-/**
- * @dev This contract implements a proxy that is upgradeable by an admin.
- *
- * To avoid https://medium.com/nomic-labs-blog/malicious-backdoors-in-ethereum-proxies-62629adf3357[proxy selector
- * clashing], which can potentially be used in an attack, this contract uses the
- * https://blog.openzeppelin.com/the-transparent-proxy-pattern/[transparent proxy pattern]. This pattern implies two
- * things that go hand in hand:
- *
- * 1. If any account other than the admin calls the proxy, the call will be forwarded to the implementation, even if
- * that call matches one of the admin functions exposed by the proxy itself.
- * 2. If the admin calls the proxy, it can access the admin functions, but its calls will never be forwarded to the
- * implementation. If the admin tries to call a function on the implementation it will fail with an error that says
- * "admin cannot fallback to proxy target".
- *
- * These properties mean that the admin account can only be used for admin actions like upgrading the proxy or changing
- * the admin, so it's best if it's a dedicated account that is not used for anything else. This will avoid headaches due
- * to sudden errors when trying to call a function from the proxy implementation.
- *
- * Our recommendation is for the dedicated account to be an instance of the {ProxyAdmin} contract. If set up this way,
- * you should think of the `ProxyAdmin` instance as the real administrative interface of your proxy.
- *
- * NOTE: The real interface of this proxy is that defined in `ITransparentUpgradeableProxy`. This contract does not
- * inherit from that interface, and instead the admin functions are implicitly implemented using a custom dispatch
- * mechanism in `_fallback`. Consequently, the compiler will not produce an ABI for this contract. This is necessary to
- * fully implement transparency without decoding reverts caused by selector clashes between the proxy and the
- * implementation.
- *
- * WARNING: It is not recommended to extend this contract to add additional external functions. If you do so, the compiler
- * will not check that there are no selector conflicts, due to the note above. A selector clash between any new function
- * and the functions declared in {ITransparentUpgradeableProxy} will be resolved in favor of the new one. This could
- * render the admin operations inaccessible, which could prevent upgradeability. Transparency may also be compromised.
- */
-contract TransparentUpgradeableProxy is ERC1967Proxy {
-    /**
-     * @dev Initializes an upgradeable proxy managed by `_admin`, backed by the implementation at `_logic`, and
-     * optionally initialized with `_data` as explained in {ERC1967Proxy-constructor}.
-     */
-    constructor(
-        address _logic,
-        address admin_,
-        bytes memory _data
-    ) payable ERC1967Proxy(_logic, _data) {
-        _changeAdmin(admin_);
+echo "Creating .env file..."
+read -p "Enter your private key: " PRIVATE_KEY
+echo "PRIVATE_KEY=$PRIVATE_KEY" > .env
+echo ".env file created."
+
+echo "Configuring Hardhat..."
+cat <<EOL > hardhat.config.js
+require("@nomicfoundation/hardhat-toolbox");
+require('@openzeppelin/hardhat-upgrades');
+require("dotenv").config();
+
+module.exports = {
+  solidity: "0.8.20",
+  networks: {
+    swisstronik: {
+      url: "https://json-rpc.testnet.swisstronik.com/",
+      accounts: [\`0x\${process.env.PRIVATE_KEY}\`],
+    },
+  },
+};
+EOL
+echo "Hardhat configuration completed."
+
+echo "Creating Hello_swtr.sol contract..."
+mkdir -p contracts
+cat <<EOL > contracts/Hello_swtr.sol
+// SPDX-License-Identifier: UNLICENSED
+pragma solidity ^0.8.19;
+
+contract Swisstronik {
+    string private message;
+
+    function initialize(string memory _message) public {
+        message = _message;
     }
 
-    /**
-     * @dev Modifier used internally that will delegate the call to the implementation unless the sender is the admin.
-     *
-     * CAUTION: This modifier is deprecated, as it could cause issues if the modified function has arguments, and the
-     * implementation provides a function with the same selector.
-     */
-    modifier ifAdmin() {
-        if (msg.sender == _getAdmin()) {
-            _;
-        } else {
-            _fallback();
-        }
+    function setMessage(string memory _message) public {
+        message = _message;
     }
 
-    /**
-     * @dev If caller is the admin process the call internally, otherwise transparently fallback to the proxy behavior
-     */
-    function _fallback() internal virtual override {
-        bytes memory ret;
-        bytes4 selector = msg.sig;
-        if (msg.sender == _getAdmin()) {
-            if (selector == ITransparentUpgradeableProxy.upgradeTo.selector) {
-                ret = _dispatchUpgradeTo();
-            } else if (
-                selector ==
-                ITransparentUpgradeableProxy.upgradeToAndCall.selector
-            ) {
-                ret = _dispatchUpgradeToAndCall();
-            } else if (
-                selector == ITransparentUpgradeableProxy.changeAdmin.selector
-            ) {
-                ret = _dispatchChangeAdmin();
-            } else if (
-                selector == ITransparentUpgradeableProxy.admin.selector
-            ) {
-                ret = _dispatchAdmin();
-            } else if (
-                selector == ITransparentUpgradeableProxy.implementation.selector
-            ) {
-                ret = _dispatchImplementation();
-            } else {
-                revert(
-                    "TransparentUpgradeableProxy: admin cannot fallback to proxy target"
-                );
-            }
-            assembly {
-                return(add(ret, 0x20), mload(ret))
-            }
-        } else {
-            // This is a dirty hack to get admin and implementation addresses without direct reading of storage.
-            // Because of it, implementation contract cannot contain `admin()` or `implementation()` public functions.
-            if (selector == ITransparentUpgradeableProxy.admin.selector) {
-                ret = _dispatchAdmin();
-                assembly {
-                    return(add(ret, 0x20), mload(ret))
-                }
-            } else if (
-                selector == ITransparentUpgradeableProxy.implementation.selector
-            ) {
-                ret = _dispatchImplementation();
-                assembly {
-                    return(add(ret, 0x20), mload(ret))
-                }
-            } else {
-                super._fallback();
-            }
-        }
-    }
-
-    /**
-     * @dev Returns the current admin.
-     *
-     * TIP: To get this value clients can read directly from the storage slot shown below (specified by EIP1967) using the
-     * https://eth.wiki/json-rpc/API#eth_getstorageat[`eth_getStorageAt`] RPC call.
-     * `0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103`
-     */
-    function _dispatchAdmin() private returns (bytes memory) {
-        _requireZeroValue();
-
-        address admin = _getAdmin();
-        return abi.encode(admin);
-    }
-
-    /**
-     * @dev Returns the current implementation.
-     *
-     * TIP: To get this value clients can read directly from the storage slot shown below (specified by EIP1967) using the
-     * https://eth.wiki/json-rpc/API#eth_getstorageat[`eth_getStorageAt`] RPC call.
-     * `0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc`
-     */
-    function _dispatchImplementation() private returns (bytes memory) {
-        _requireZeroValue();
-
-        address implementation = _implementation();
-        return abi.encode(implementation);
-    }
-
-    /**
-     * @dev Changes the admin of the proxy.
-     *
-     * Emits an {AdminChanged} event.
-     */
-    function _dispatchChangeAdmin() private returns (bytes memory) {
-        _requireZeroValue();
-
-        address newAdmin = abi.decode(msg.data[4:], (address));
-        _changeAdmin(newAdmin);
-
-        return "";
-    }
-
-    /**
-     * @dev Upgrade the implementation of the proxy.
-     */
-    function _dispatchUpgradeTo() private returns (bytes memory) {
-        _requireZeroValue();
-
-        address newImplementation = abi.decode(msg.data[4:], (address));
-        _upgradeToAndCall(newImplementation, bytes(""), false);
-
-        return "";
-    }
-
-    /**
-     * @dev Upgrade the implementation of the proxy, and then call a function from the new implementation as specified
-     * by `data`, which should be an encoded function call. This is useful to initialize new storage variables in the
-     * proxied contract.
-     */
-    function _dispatchUpgradeToAndCall() private returns (bytes memory) {
-        (address newImplementation, bytes memory data) = abi.decode(
-            msg.data[4:],
-            (address, bytes)
-        );
-        _upgradeToAndCall(newImplementation, data, true);
-
-        return "";
-    }
-
-    /**
-     * @dev Returns the current admin.
-     *
-     * CAUTION: This function is deprecated. Use {ERC1967Upgrade-_getAdmin} instead.
-     */
-    function _admin() internal view virtual returns (address) {
-        return _getAdmin();
-    }
-
-    /**
-     * @dev To keep this contract fully transparent, all `ifAdmin` functions must be payable. This helper is here to
-     * emulate some proxy functions being non-payable while still allowing value to pass through.
-     */
-    function _requireZeroValue() private {
-        require(msg.value == 0);
+    function getMessage() public view returns(string memory) {
+        return message;
     }
 }
+EOL
+echo "Hello_swtr.sol contract created."
+
+echo "Compiling the contract..."
+npx hardhat compile
+echo "Contract compiled."
+
+echo "Creating deploy.js script..."
+mkdir -p scripts
+cat <<EOL > scripts/deploy.js
+const fs = require("fs");
+
+async function main() {
+  const [deployer] = await ethers.getSigners();
+
+  console.log("Deploying contracts with the account:", deployer.address);
+
+  const Swisstronik = await ethers.getContractFactory('Swisstronik');
+  const swisstronik = await Swisstronik.deploy();
+  await swisstronik.waitForDeployment(); 
+  console.log('Non-proxy Swisstronik deployed to:', swisstronik.target);
+  fs.writeFileSync("contract.txt", swisstronik.target);
+
+  console.log(\`Deployment transaction hash: https://explorer-evm.testnet.swisstronik.com/address/\${swisstronik.target}\`);
+
+  console.log('');
+  
+  const upgradedSwisstronik = await upgrades.deployProxy(Swisstronik, ['Hello Swisstronik from Happy Cuan Airdrop!!'], { kind: 'transparent' });
+  await upgradedSwisstronik.waitForDeployment(); 
+  console.log('Proxy Swisstronik deployed to:', upgradedSwisstronik.target);
+  fs.writeFileSync("proxiedContract.txt", upgradedSwisstronik.target);
+
+  console.log(\`Deployment transaction hash: https://explorer-evm.testnet.swisstronik.com/address/\${upgradedSwisstronik.target}\`);
+}
+
+main()
+  .then(() => process.exit(0))
+  .catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+EOL
+echo "deploy.js script created."
+
+echo "Deploying the contract..."
+npx hardhat run scripts/deploy.js --network swisstronik
+echo "Contract deployed."
+
+echo "Creating setMessage.js script..."
+cat <<EOL > scripts/setMessage.js
+const hre = require("hardhat");
+const { encryptDataField, decryptNodeResponse } = require("@swisstronik/utils");
+const fs = require("fs");
+
+const sendShieldedTransaction = async (signer, destination, data, value) => {
+  const rpclink = hre.network.config.url;
+  const [encryptedData] = await encryptDataField(rpclink, data);
+  return await signer.sendTransaction({
+    from: signer.address,
+    to: destination,
+    data: encryptedData,
+    value,
+  });
+};
+
+async function main() {
+  const contractAddress = fs.readFileSync("proxiedContract.txt", "utf8").trim();
+  const [signer] = await hre.ethers.getSigners();
+  const contractFactory = await hre.ethers.getContractFactory("Swisstronik");
+  const contract = contractFactory.attach(contractAddress);
+  const functionName = "setMessage";
+  const messageToSet = "Hello Swisstronik from Happy Cuan Airdrop!!";
+  const setMessageTx = await sendShieldedTransaction(signer, contractAddress, contract.interface.encodeFunctionData(functionName, [messageToSet]), 0);
+  await setMessageTx.wait();
+  console.log("Transaction Receipt: ", setMessageTx);
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
+EOL
+echo "setMessage.js script created."
+
+echo "Running setMessage.js..."
+npx hardhat run scripts/setMessage.js --network swisstronik
+echo "Message set."
+
+echo "Creating getMessage.js script..."
+cat <<EOL > scripts/getMessage.js
+const hre = require("hardhat");
+const { encryptDataField, decryptNodeResponse } = require("@swisstronik/utils");
+const fs = require("fs");
+
+const sendShieldedQuery = async (provider, destination, data) => {
+  const rpclink = hre.network.config.url;
+  const [encryptedData, usedEncryptedKey] = await encryptDataField(rpclink, data);
+  const response = await provider.call({
+    to: destination,
+    data: encryptedData,
+  });
+  return await decryptNodeResponse(rpclink, response, usedEncryptedKey);
+};
+
+async function main() {
+  const contractAddress = fs.readFileSync("proxiedContract.txt", "utf8").trim();
+  const [signer] = await hre.ethers.getSigners();
+  const contractFactory = await hre.ethers.getContractFactory("Swisstronik");
+  const contract = contractFactory.attach(contractAddress);
+  const functionName = "getMessage";
+  const responseMessage = await sendShieldedQuery(signer.provider, contractAddress, contract.interface.encodeFunctionData(functionName));
+  console.log("Decoded response:", contract.interface.decodeFunctionResult(functionName, responseMessage)[0]);
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
+EOL
+echo "getMessage.js script created."
+
+echo "Running getMessage.js..."
+npx hardhat run scripts/getMessage.js --network swisstronik
+echo "Message retrieved."
+echo "Done! Subscribe: https://t.me/HappyCuanAirdrop"
